@@ -1,9 +1,10 @@
 defmodule Broadcaster.Server do
   use GenServer
+  alias Broadcaster.Store
 
   require Logger
 
-  defstruct [:supervisor, :new_client, clients: []]
+  defstruct [:supervisor, :client]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -31,7 +32,7 @@ defmodule Broadcaster.Server do
         Logger.info("Listening on the port: #{port}")
 
         state = %__MODULE__{
-          new_client: socket,
+          client: socket,
           supervisor: supervisor
         }
 
@@ -46,14 +47,14 @@ defmodule Broadcaster.Server do
   @impl true
   def handle_continue(
         :accept,
-        %__MODULE__{clients: clients, new_client: socket, supervisor: supervisor} = state
+        %__MODULE__{client: socket, supervisor: supervisor} = state
       ) do
     case :gen_tcp.accept(socket) do
       {:ok, socket} ->
-        state = %{state | clients: [socket | clients]}
+        Store.add_clients(socket)
 
         Logger.info("Start accepting connections. Socket #{inspect(socket)}")
-        Task.Supervisor.start_child(supervisor, fn -> connect(socket, clients) end)
+        Task.Supervisor.start_child(supervisor, fn -> connect(socket) end)
 
         {:noreply, state, {:continue, :accept}}
 
@@ -63,8 +64,8 @@ defmodule Broadcaster.Server do
     end
   end
 
-  defp connect(socket, sockets) do
-    case recv_until_closed(socket, sockets, _buffer = "") do
+  defp connect(socket) do
+    case recv_until_closed(socket, _buffer = "") do
       {:ok, data} ->
         Logger.info("CLOSED | serve | FROM #{inspect(socket)} | #{inspect(data)}")
 
@@ -74,7 +75,7 @@ defmodule Broadcaster.Server do
     end
   end
 
-  defp recv_until_closed(socket, sockets, buffer) do
+  defp recv_until_closed(socket, buffer) do
     IO.inspect(socket)
 
     case :gen_tcp.recv(socket, 0) do
@@ -83,10 +84,12 @@ defmodule Broadcaster.Server do
           "RECEIVED REQUEST | recv_until_closed | FROM #{inspect(socket)} | #{inspect(data)}"
         )
 
-        broadcast(sockets, data)
-        recv_until_closed(socket, sockets, [buffer, data])
+        broadcast(data)
+        recv_until_closed(socket, [buffer, data])
 
       {:error, :closed} ->
+        IO.inspect("CLOSED")
+        Store.remove_client(socket)
         {:ok, buffer}
 
       {:error, reason} ->
@@ -95,7 +98,13 @@ defmodule Broadcaster.Server do
     end
   end
 
-  defp broadcast(sockets, data) do
+  defp get_clients() do
+    Store.get_clients()
+  end
+
+  defp broadcast(data) do
+    sockets = get_clients()
+
     Logger.info("BROADCASTING | COUNT | #{inspect(sockets |> Enum.count())}")
 
     sockets

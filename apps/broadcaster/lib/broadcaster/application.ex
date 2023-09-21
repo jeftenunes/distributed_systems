@@ -10,7 +10,8 @@ defmodule Broadcaster.Application do
     children = [
       # Starts a worker by calling: Broadcaster.Worker.start_link(arg)
       # {Broadcaster.Worker, arg}
-      {Broadcaster.Server, port: 4001}
+      {Broadcaster.Server, port: 4001},
+      Broadcaster.Store
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
