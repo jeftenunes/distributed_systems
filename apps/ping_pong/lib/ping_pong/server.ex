@@ -3,7 +3,7 @@ defmodule PingPong.Server do
 
   require Logger
 
-  defstruct [:socket, :supervisor, clients: []]
+  defstruct [:socket, :supervisor]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -45,11 +45,10 @@ defmodule PingPong.Server do
   @impl true
   def handle_continue(
         :accept,
-        %__MODULE__{socket: socket, supervisor: supervisor, clients: clients} = state
+        %__MODULE__{socket: socket, supervisor: supervisor} = state
       ) do
     case :gen_tcp.accept(socket) do
       {:ok, socket} ->
-        state = %__MODULE__{state | clients: [socket | clients]}
         Task.Supervisor.start_child(supervisor, fn -> connect(socket) end)
         {:noreply, state, {:continue, :accept}}
 
@@ -73,8 +72,9 @@ defmodule PingPong.Server do
     case :gen_tcp.recv(socket, 0) do
       {:ok, data} ->
         IO.puts("RECEIVED REQUEST | FROM #{inspect(socket)} | #{inspect(data)}")
-        # :gen_tcp.send(socket, "ECHO | #{data}")
-        broadcast(data, buffer)
+        :gen_tcp.send(socket, "ECHO | #{data}")
+
+        recv(socket, [buffer, data])
 
       {:error, :closed} ->
         {:ok, buffer}
@@ -83,19 +83,5 @@ defmodule PingPong.Server do
         IO.puts("Error receiving data. #{inspect(reason)}")
         {:error, reason}
     end
-  end
-
-  defp broadcast(data, buffer) do
-    send(self(), {:broadcast, data, buffer})
-  end
-
-  @impl true
-  def handle_info({:broadcast, data, buffer}, state) do
-    Enum.each(state.clients, fn client ->
-      :gen_tcp.send(client, "ECHO | #{data}")
-      recv(client, buffer)
-    end)
-
-    {:noreply, state}
   end
 end
